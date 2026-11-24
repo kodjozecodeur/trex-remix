@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T-Rex Remix</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #140c1f; display: grid; place-items: center; }
+  canvas { width: min(96vw, 1200px); image-rendering: pixelated; border-radius: 6px; box-shadow: 0 0 40px #0008; }
+  p { color: #b3adc4; font: 14px monospace; text-align: center; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<div>
+  <canvas id="c" width="800" height="300" aria-label="T-Rex Remix game"></canvas>
+  <p>Space / ↑ jump · ↓ duck (fast-drop in air) · X throw fireball · P pause · M mute</p>
+</div>
+<script src="logic.js"></script>
+<script>
+const cv = document.getElementById('c');
+const g = cv.getContext('2d');
+const GROUND = 262; // screen y of the ground line
+
+// ---------- Sprites: pixel grids scaled into the fixed SIZE boxes from logic.js ----------
+const PAL = {
+  K: '#1b1530', D: '#1f7a3a', G: '#3fbf5a', L: '#c8f59a', W: '#ffffff', R: '#e8433a',
+  s: '#4a4458', g: '#7d7790', h: '#b3adc4', O: '#ff8a1f', Y: '#ffe14a', r: '#b8231c',
+  P: '#4b2a78', p: '#7a4ab0', q: '#c79bf2', E: '#6a3a8e', e: '#ff5470',
+};
+const HEAD = [
+  '..........DDDDDDDD....',
+  '.........DGGGGGGGGD...',
+  '.........DGGWKGGGGGD..',
+  '.........DGGKKGGGGGD..',
+  '.........DGGGGGGGGGD..',
+  '.........DGGGGGGRRRD..',
+  '.........DGGGGDDDDDD..',
+  '.........DGGGGGGGD....',
+  'DD.......DGGGGDDD.....',
+  'DGD.....DGGGGGD.......',
+  'DGGD...DGGGGGGGDD.....',
+  'DGGGDDDGGGGGGDGGD.....',
+  'DGGGGGGGLLGGGD.D......',
+  '.DGGGGGGLLLGGD........',
+  '..DGGGGGLLLGD.........',
+  '...DGGGGGLLGD.........',
+  '....DGGGGGGD..........',
+  '.....DGGGGD...........',
+];
+const SPR = {
+  runA: HEAD.concat(['.....DGD.DGD..........', '.....DG...DG..........', '.....DD...DD..........', '.....DDD...DDD........', '......................', '......................']),
+  runB: HEAD.concat(['......DGDGD...........', '......DGGD............', '.....DD.DD............', '....DDD..DDD..........', '......................', '......................']),
+  jump: HEAD.concat(['......DGGD............', '......DGD.............', '......DD..............', '......DDD.............', '......................', '......................']),
+  duck: [
+    '..................DDDDDDDD..',
+    '.................DGGGGGGGGD.',
+    'DD..............DGGWKGGGGGGD',
+    'DGDD...........DGGGKKGGGGGGD',
+    'DGGGDDDDDDDDDDDGGGGGGGGRRRDD',
+    '.DGGGGGGGGGGGGGGGGGGGDDDDD..',
+    '..DGGGGGLLLLLLLGGGGD........',
+    '...DGGGGLLLLLLGGGDGD........',
+    '....DGGGGGGGGGGGD.D.........',
+    '.....DGDDDDDDGD.............',
+    '.....DG.....DGD.............',
+    '.....DD......DD.............',
+    '.....DDD.....DDD............',
+  ],
+  boulder: [
+    '.....ssssss....',
+    '...ssgggggsss..',
+    '..sgghhgggggss.',
+    '.sghhggggggggs.',
+    '.sghgggggsgggs.',
+    'sgggggggsggggss',
+    'sgggggggggggggs',
+    'sgggsgggggggggs',
+    'sgggssggggggggs',
+    'sggggggggggsggs',
+    '.sgggggggggsgs.',
+    '.ssgggggggggss.',
+    '..ssssgggssss..',
+    '....sssssss....',
+  ],
+  vent: [
+    '...O..Y..O...', '..OYO.O.OYO..', '...OYYYYYO...', '....OYWYO....',
+    '....rOYOr....', '....srOrs....', '...ssrOrss...', '...sgsrsgs...',
+    '...sggrggs...', '..ssggrgsss..', '..sgggrgggs..', '..sghgrgggs..',
+    '..sgggOgggs..', '.ssggrOrggss.', '.sghgrOrgggs.', '.sgggrrrgggs.',
+    '.sggggrggggs.', 'ssgghggrgggss', 'sgggggrggggs.', 'sgghggrgggggs',
+    'sggggrOrggggs', 'sgggrOOOrgggs', 'ssggrOYOrggss', 'sssgrrrrrgsss',
+    'sssssssssssss', 'sssssssssssss',
+  ],
+  beetle: [
+    '......PPPPPPP....', '....PPpqqpppPPP..', '...PpqqppppppPPP.',
+    '..KPppppppppppPP.', '.KWKPpppppppppPP.', 'KKKKPPPPPPPPPPPP.',
+    '.KK.PPPPPPPPPPP..', '...K..K..K..K....', '..K..K..K..K.....', '.................',
+  ],
+  batA: [
+    'K...............K', 'KK.............KK', 'KEK....K.K....KEK',
+    'KEEK..KEKEK..KEEK', '.KEEKKEEEEEKKEEK.', '..KEEEeEEEeEEEK..',
+    '...KKEEEEEEEKK...', '.......KEK.......', '........K........',
+  ],
+  batB: [
+    '.......K.K.......', '......KEKEK......', '...KKKEEEEEKKK...',
+    '.KKEEEEeEeEEEEKK.', 'KEEEKKEEEEEKKEEEK', 'KEEK..KEEEK..KEEK',
+    'KEK....KEK....KEK', 'KK......K......KK', 'K...............K',
+  ],
+  fireball: ['...rOO.', '.rOYYYO', 'rOYWWYO', '.rOYYYO', '...rOO.'],
+  power: [
+    '....Y......', '...YOY..Y..', '...YOOY.OY.', '..YOROOYOY.', '.YORRROOOY.', '.YORYYROOY.',
+    'YORYWWYROOY', 'YORYWWYRROY', '.YORYYRRRY.', '..YYOOOOYY.', '....YYYY...',
+  ],
+  heart: ['.RR.RR.', 'RWRRRRR', 'RRRRRRR', '.RRRRR.', '..RRR..', '...R...'],
+  heartOff: ['.ss.ss.', 'sssssss', 'sssssss', '.sssss.', '..sss..', '...s...'],
+};
+
+// Draws a grid so it fills exactly the w x h box (the swap point for a future sprite sheet).
+function sprite(grid, x, y, w, h) {
+  const cols = Math.max(...grid.map((r) => r.length)), px = w / cols, py = h / grid.length;
+  grid.forEach((row, j) => {
+    for (let i = 0; i < row.length; i++) {
+      const c = PAL[row[i]];
+      if (!c) continue;
+      g.fillStyle = c;
+      g.fillRect(Math.round(x + i * px), Math.round(y + j * py), Math.ceil(px), Math.ceil(py));
+    }
+  });
+}
+
+// ---------- Background: dusk sky, volcano, jungle, ground ----------
+const sky = g.createLinearGradient(0, 0, 0, GROUND);
+sky.addColorStop(0, '#2b1840'); sky.addColorStop(0.55, '#8a3460'); sky.addColorStop(1, '#f2873e');
+
+function background(dist, t) {
+  g.fillStyle = sky; g.fillRect(0, 0, W, GROUND);
+  // volcano, slow parallax
+  const vx = 520 - ((dist * 0.03) % (W + 400));
+  for (const off of [0, W + 400]) {
+    const x = vx + off;
+    g.fillStyle = '#3a2238';
+    for (let y = 0; y < 150; y += 4) {
+      const half = 30 + y * 1.3;
+      g.fillRect(Math.round(x - half), GROUND - 150 + y, Math.round(half * 2), 4);
+    }
+    g.fillStyle = '#ff8a1f'; g.fillRect(x - 28, GROUND - 152, 56, 4);
+    g.fillStyle = Math.floor(t * 3) % 2 ? '#ffe14a' : '#ff8a1f';
+    g.fillRect(x - 12, GROUND - 160, 8, 8); g.fillRect(x + 6, GROUND - 166, 6, 6);
+    g.fillStyle = '#e8433a';
+    for (let y = 0; y < 90; y += 6) g.fillRect(Math.round(x - 4 + Math.sin(y / 14) * 10), GROUND - 148 + y, 6, 6);
+  }
+  // jungle silhouettes, medium parallax
+  const jx = -((dist * 0.3) % 160);
+  for (let x = jx; x < W + 160; x += 160) {
+    g.fillStyle = '#21402f';
+    g.fillRect(x + 40, GROUND - 70, 6, 70);
+    g.fillRect(x + 14, GROUND - 76, 58, 8); g.fillRect(x + 4, GROUND - 68, 24, 6); g.fillRect(x + 58, GROUND - 68, 26, 6);
+    g.fillRect(x + 100, GROUND - 26, 44, 26); g.fillRect(x + 108, GROUND - 38, 28, 12);
+  }
+  // ground
+  g.fillStyle = '#6a3f28'; g.fillRect(0, GROUND, W, cv.height - GROUND);
+  g.fillStyle = '#3fbf5a'; g.fillRect(0, GROUND, W, 6);
+  g.fillStyle = '#1f7a3a'; g.fillRect(0, GROUND + 6, W, 2);
+  g.fillStyle = '#8a5a34';
+  const gx = -(dist % 64);
+  for (let x = gx; x < W; x += 64) { g.fillRect(x + 8, GROUND + 16, 10, 4); g.fillRect(x + 40, GROUND + 26, 6, 4); }
+}
+
+// ---------- Sound: tiny synthesized effects ----------
+let ac = null, muted = false;
+function tone(f1, f2, dur, type = 'square', vol = 0.07, delay = 0) {
+  if (muted || !ac) return;
+  const o = ac.createOscillator(), v = ac.createGain(), t = ac.currentTime + delay;
+  o.type = type;
+  o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  v.gain.setValueAtTime(vol, t); v.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(v).connect(ac.destination); o.start(t); o.stop(t + dur);
+}
+const SFX = {
+  jump: () => tone(300, 620, 0.12),
+  throw: () => tone(900, 180, 0.15, 'sawtooth', 0.05),
+  kill: () => tone(220, 50, 0.25, 'square', 0.09),
+  power: () => { tone(520, 1040, 0.1); tone(780, 1560, 0.12, 'square', 0.07, 0.09); },
+  hit: () => tone(170, 45, 0.35, 'sawtooth', 0.1),
+  over: () => tone(420, 70, 0.7, 'triangle', 0.12),
+};
+
+// ---------- Input ----------
+const held = new Set();
+let pausePressed = false;
+addEventListener('keydown', (e) => {
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  ac ||= new AudioContext();
+  held.add(e.code);
+  if (e.repeat) return;
+  if (e.code === 'KeyP') pausePressed = true;
+  if (e.code === 'KeyM') muted = !muted;
+});
+addEventListener('keyup', (e) => held.delete(e.code));
+addEventListener('blur', () => held.clear());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && s.phase === 'running') pausePressed = true;
+});
+
+// ---------- Loop ----------
+const HI_KEY = 'trexRemixHighScore';
+let s = init((Math.random() * 2 ** 31) | 0);
+let hi = Number(localStorage.getItem(HI_KEY)) || 0, newHi = false, last = 0;
+
+function frame(now) {
+  // ponytail: 1/30 s cap keeps a Fireball from skipping past an Enemy in one frame; swept collision if that's not enough.
+  const dt = Math.min(1 / 30, Math.max(0, (now - last) / 1000) || 0);
+  last = now;
+  const was = s.phase;
+  s = step(s, {
+    jump: held.has('Space') || held.has('ArrowUp'),
+    duck: held.has('ArrowDown'),
+    throw: held.has('KeyX'),
+    pause: pausePressed,
+  }, dt);
+  pausePressed = false;
+  for (const e of s.events) SFX[e]?.();
+  if (s.phase === 'over' && was !== 'over') {
+    newHi = s.score > hi;
+    if (newHi) { hi = s.score; localStorage.setItem(HI_KEY, hi); }
+  }
+  draw(now / 1000);
+  requestAnimationFrame(frame);
+}
+
+const pad = (n) => String(n).padStart(5, '0');
+function text(str, x, y, size = 16, align = 'left', color = '#fff') {
+  g.font = `bold ${size}px "Courier New", monospace`;
+  g.textAlign = align;
+  g.fillStyle = '#1b1530'; g.fillText(str, x + 2, y + 2);
+  g.fillStyle = color; g.fillText(str, x, y);
+}
+
+function draw(t) {
+  background(s.dist, t);
+  const sy = (e) => GROUND - e.y - e.h;
+  for (const e of s.ents) {
+    const grid = e.kind === 'lowBat' || e.kind === 'highBat' ? (Math.floor(t * 8) % 2 ? SPR.batA : SPR.batB) : SPR[e.kind];
+    const bob = e.kind === 'power' ? Math.round(Math.sin(t * 5) * 3) : 0;
+    sprite(grid, e.x, sy(e) + bob, e.w, e.h);
+  }
+  const r = s.runner;
+  const blinkOff = s.inv > 0 && Math.floor(s.inv * 12) % 2;
+  if (!blinkOff) {
+    const [w, h] = SIZE[r.duck ? 'duck' : 'runner'];
+    const pose = r.duck ? SPR.duck : r.y > 0 ? SPR.jump : s.phase === 'running' && Math.floor(s.dist / 40) % 2 ? SPR.runB : SPR.runA;
+    sprite(pose, RUNNER_X, GROUND - r.y - h, w, h);
+  }
+
+  // HUD
+  for (let i = 0; i < R.LIVES; i++) sprite(i < s.lives ? SPR.heart : SPR.heartOff, 16 + i * 26, 14, 21, 18);
+  sprite(SPR.fireball, 16, 42, 21, 15);
+  text(`x${s.ammo}`, 42, 56, 16, 'left', s.ammo ? '#ffe14a' : '#b3adc4');
+  text(`HI ${pad(Math.max(hi, s.score))}  ${pad(s.score)}`, W - 16, 30, 18, 'right');
+
+  if (s.phase === 'title') {
+    text('T-REX REMIX', W / 2, 110, 40, 'center', '#ffe14a');
+    text('Press Space to run', W / 2, 150, 18, 'center');
+  } else if (s.phase === 'paused') {
+    text('PAUSED', W / 2, 120, 32, 'center');
+    text('Press P to resume', W / 2, 150, 16, 'center');
+  } else if (s.phase === 'over') {
+    text('GAME OVER', W / 2, 100, 36, 'center', '#e8433a');
+    text(`Score ${pad(s.score)}   HI ${pad(hi)}${newHi ? '  NEW!' : ''}`, W / 2, 136, 18, 'center', newHi ? '#ffe14a' : '#fff');
+    if (s.overT >= R.RETRY) text('Press Space to retry', W / 2, 166, 16, 'center');
+  }
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
